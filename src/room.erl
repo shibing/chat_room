@@ -17,7 +17,8 @@
          getAnonymousName/1,
          addParticipant/3,
          getParticipant/2,
-         broadcastMsg/3
+         modifyNick/4,
+         sayToAll/3
         ]).
 
 %% gen_server callbacks
@@ -58,8 +59,12 @@ addParticipant(ServerRef, Name, Ref) ->
 getParticipant(ServerRef, Name) ->
     gen_server:call(ServerRef, {getParticipant, Name}).
 
-broadcastMsg(ServerRef, SenderName, Data) ->
-    gen_server:cast(ServerRef, {broadcastMsg, SenderName, Data}).
+modifyNick(ServerRef, OldName, NewName, Ref) ->
+    gen_server:call(ServerRef, {modifyNick, {OldName, NewName, Ref}}).
+
+
+sayToAll(ServerRef, SenderName, Data) ->
+    gen_server:cast(ServerRef, {sayToAll, SenderName, Data}).
 
 
 
@@ -123,8 +128,22 @@ handle_call({getParticipant, Name}, _From, State) ->
             {reply, {ok, Ref}, State};
         error ->
             {reply, {error, not_exist_user}, State}
-    end.
+    end;
 
+handle_call({modifyNick, {OldName, NewName, Ref}}, _From, State) ->
+    ParticipantList = State#state.participants,
+    case dict:find(OldName, ParticipantList) of  
+        {ok, [Ref]} ->
+            case dict:find(NewName, ParticipantList) of 
+                error ->
+                    NewParticipants = dict:erase(OldName, dict:append(NewName, Ref, ParticipantList)),
+                    {reply, {ok}, State#state{participants = NewParticipants}};
+                {ok, [_]} ->
+                    {reply, {error, already_exist_user}, State}
+            end;
+        error ->
+            {reply, {error, user_not_exist}, State}
+    end.
 
 
 %%--------------------------------------------------------------------
@@ -138,7 +157,7 @@ handle_call({getParticipant, Name}, _From, State) ->
 %% @end
 %%--------------------------------------------------------------------
 
-handle_cast({broadcastMsg, SenderName, Msg}, State) ->
+handle_cast({sayToAll, SenderName, Msg}, State) ->
     dict:map(
       fun(PName, [PRef]) ->
               case PName =:= SenderName of

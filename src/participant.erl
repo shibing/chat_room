@@ -1,4 +1,5 @@
 -module(participant).
+-compile([debug_info]).
 
 -behaviour(gen_server).
 
@@ -19,7 +20,8 @@
           lsock, %监听套接字
           sock,
           nick , %用户昵称,
-          room_name %聊天室名称
+          room_name, %聊天室名称
+          data_buf  %缓存用户发送的消息
          }).
 
 %%%===================================================================
@@ -49,20 +51,6 @@ joinDefaultRoom() ->
 sendMsg(ParticipantRef, From, Msg) ->
     gen_server:cast(ParticipantRef, {sendMsg, From, Msg}).
 
-processData([ $/ | Data], State) -> 
-    Data_  = re:replace(Data, "\r\n", "", [{return, list}]),
-    {Command, _Parameter} = lists:splitwith(fun(C) -> [C] =/= " " end, Data_),
-    {_, Parameter} = lists:partition(fun(C) -> [C] =:= " " end, _Parameter),
-    doCommand(Command, Parameter);
-
-processData(Data, State) ->
-    {ok, RoomRef} = room_manager:getRoom(State#state.room_name),
-    room:broadcastMsg(RoomRef, State#state.nick, Data).
-    
-doCommand("nick", Name) ->
-    ok.
-
-
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
@@ -79,7 +67,7 @@ doCommand("nick", Name) ->
 %% @end
 %%--------------------------------------------------------------------
 init([LSock]) ->
-    {ok, #state{lsock = LSock}, 0}.
+    {ok, #state{lsock = LSock, data_buf = []}, 0}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -136,8 +124,15 @@ handle_info({tcp_closed, _}, State) ->
     {stop, normal, State};
 
 handle_info({tcp, _Sock, Data}, State) ->
-    processData(Data, State),
-    {noreply, State}.
+    _Data = lists:append(State#state.data_buf, Data),
+    NewState = processData(State#state{data_buf = _Data}),
+    io:format("~p~n", [NewState]),
+    case NewState of 
+        {quit, _NewState} ->
+            {stop, user_quit, _NewState};
+        _ ->
+            {noreply, NewState}
+    end.
 
 
 %%--------------------------------------------------------------------
@@ -169,3 +164,62 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+processData(State) ->
+    Data = State#state.data_buf,
+    case lists:splitwith(fun(C) -> C =/= $\r end, Data) of 
+        {_Msg, []} -> % need more data
+            State;
+        {_Msg, [$\r]} -> % need more data
+            State;
+        {Msg, [$\r, $\n | Remain]} ->
+            case Msg of
+                [$/ | Command] -> 
+                    case doCommand(Command, State) of 
+                        {ok, NewState} ->
+                            processData(NewState#state{data_buf = Remain});
+                        {stop, NewState} -> 
+                            {stop, NewState};
+                        error ->
+                            State#state{data_buf = []}
+                    end;
+                _ -> % chat to all
+                    sayToAll(Msg, State),
+                    processData(State#state{data_buf = Remain})
+            end;
+        {_Msg, [$\r, _ | _Remain]} -> % format error
+            State#state{data_buf = []}
+    end.
+
+doCommand(Command, State) ->
+    case Command of 
+        [$n, $i, $c, $k | Remain] ->
+            {ok, NewNick} = modifyNick(string:strip(Remain), State),
+            {ok, State#state{nick = NewNick}};
+        [$q, $u, $i, $t | _ ] ->
+            {stop, State};
+        _ ->
+            ok
+    end.
+
+modifyNick([], _State) ->
+    {error, empty_name};
+
+modifyNick(Nick, State) ->
+    if Nick =:=  State#state.nick ->
+           {ok, Nick};
+       true ->
+           {ok, Room} = room_manager:getRoom(State#state.room_name),
+           case room:modifyNick(Room, State#state.nick, Nick, self()) of 
+               {ok} ->
+                   {ok, Nick};
+              Error ->
+                   Error 
+            end
+    end.
+
+sayToAll(Msg, State) ->
+    {ok, Room} = room_manager:getRoom(State#state.room_name),
+    room:sayToAll(Room, State#state.nick, lists:append(Msg, "\r\n")),
+    ok.
+
