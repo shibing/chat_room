@@ -127,7 +127,7 @@ handle_call({getParticipant, Name}, _From, State) ->
         {ok, [Ref]} ->
             {reply, {ok, Ref}, State};
         error ->
-            {reply, {error, not_exist_user}, State}
+            {reply, {error, user_not_exist}, State}
     end;
 
 handle_call({modifyNick, {OldName, NewName, Ref}}, _From, State) ->
@@ -137,7 +137,7 @@ handle_call({modifyNick, {OldName, NewName, Ref}}, _From, State) ->
             case dict:find(NewName, ParticipantList) of 
                 error ->
                     NewParticipants = dict:erase(OldName, dict:append(NewName, Ref, ParticipantList)),
-                    {reply, {ok}, State#state{participants = NewParticipants}};
+                    {reply, ok, State#state{participants = NewParticipants}};
                 {ok, [_]} ->
                     {reply, {error, already_exist_user}, State}
             end;

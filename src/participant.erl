@@ -124,14 +124,16 @@ handle_info({tcp_closed, _}, State) ->
     {stop, normal, State};
 
 handle_info({tcp, _Sock, Data}, State) ->
+    io:format("~p~n", [State]),
     _Data = lists:append(State#state.data_buf, Data),
-    NewState = processData(State#state{data_buf = _Data}),
-    io:format("~p~n", [NewState]),
-    case NewState of 
-        {quit, _NewState} ->
-            {stop, user_quit, _NewState};
-        _ ->
-            {noreply, NewState}
+    case processData(State#state{data_buf = _Data}) of
+        {stop, NewState} ->
+            {stop, normal, NewState};
+        {ok, NewState} ->
+            {noreply, NewState};
+        {error, Reason} ->
+            gen_tcp:send(State#state.sock, lists:append(atom_to_list(Reason), "\r\n")),
+            {noreply, State#state{data_buf = []}} 
     end.
 
 
@@ -169,37 +171,39 @@ processData(State) ->
     Data = State#state.data_buf,
     case lists:splitwith(fun(C) -> C =/= $\r end, Data) of 
         {_Msg, []} -> % need more data
-            State;
+            {ok, State};
         {_Msg, [$\r]} -> % need more data
-            State;
+            {ok, State};
         {Msg, [$\r, $\n | Remain]} ->
             case Msg of
+                [] ->
+                    processData(State#state{data_buf = Remain});
                 [$/ | Command] -> 
                     case doCommand(Command, State) of 
                         {ok, NewState} ->
                             processData(NewState#state{data_buf = Remain});
                         {stop, NewState} -> 
                             {stop, NewState};
-                        error ->
-                            State#state{data_buf = []}
+                        {error, Reason} ->
+                            gen_tcp:send(State#state.sock, lists:append(atom_to_list(Reason), "\r\n")),
+                            processData(State#state{data_buf = Remain})
                     end;
                 _ -> % chat to all
                     sayToAll(Msg, State),
                     processData(State#state{data_buf = Remain})
             end;
         {_Msg, [$\r, _ | _Remain]} -> % format error
-            State#state{data_buf = []}
+            {error, fromat_err}
     end.
 
 doCommand(Command, State) ->
     case Command of 
         [$n, $i, $c, $k | Remain] ->
-            {ok, NewNick} = modifyNick(string:strip(Remain), State),
-            {ok, State#state{nick = NewNick}};
+            modifyNick(string:strip(Remain), State);
         [$q, $u, $i, $t | _ ] ->
-            {stop, State};
+            {stop, State#state{data_buf = []}};
         _ ->
-            ok
+            {error, unsupported_command}
     end.
 
 modifyNick([], _State) ->
@@ -207,14 +211,14 @@ modifyNick([], _State) ->
 
 modifyNick(Nick, State) ->
     if Nick =:=  State#state.nick ->
-           {ok, Nick};
+           {ok, State};
        true ->
            {ok, Room} = room_manager:getRoom(State#state.room_name),
            case room:modifyNick(Room, State#state.nick, Nick, self()) of 
-               {ok} ->
-                   {ok, Nick};
-              Error ->
-                   Error 
+               ok ->
+                   {ok, State#state{nick = Nick}};
+               {error, Reason} ->
+                   {error, Reason} 
             end
     end.
 
