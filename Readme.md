@@ -19,6 +19,6 @@ erl -pa ./ebin -config ./sys
 ```
 启动chat_room应用：
 ```
-application:start().
+application:start(chat_room).
 ```
 
