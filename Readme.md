@@ -11,7 +11,7 @@
 
 首先下载源代码：
 ```
-git@github.com:shibing/chat_room.git
+git clone git@github.com:shibing/chat_room.git
 ```
 然后用下面的命令启动启动一个erlang shell：
 ```
