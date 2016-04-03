@@ -34,8 +34,8 @@
 %% @end
 %%--------------------------------------------------------------------
 start(_StartType, _StartArgs) ->
-    Port = 8099,
-    {ok, LSock} = gen_tcp:listen(Port, [{active, true}, {reuseaddr, true}]),
+    DefaultPort = 8099,
+    {ok, LSock} = gen_tcp:listen(get_env(chat_room, tcp_port, DefaultPort), [{active, true}, {reuseaddr, true}]),
     case chat_sup:start_link(LSock) of 
         {ok, Pid} ->
             {ok, Pid};
@@ -59,5 +59,8 @@ stop(_State) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-
-
+get_env(AppName, Key, Default) ->
+    case application:get_env(AppName, Key) of
+        undefined -> Default;
+        {ok, Value} -> Value
+    end.

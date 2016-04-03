@@ -41,11 +41,6 @@ start_link(LSock) ->
 getNick(ParticipantRef) ->
     gen_server:call(ParticipantRef, {getNick}).
 
-joinDefaultRoom() -> 
-    {ok,{RoomName, DefaultRoom}} = room_manager:getDefaultRoom(),
-    NickName = room:getAnonymousName(DefaultRoom),
-    room:addParticipant(DefaultRoom, NickName, self()),
-    {ok, NickName, RoomName}.
 
 %给参与者发送消息
 sendMsg(ParticipantRef, From, Msg) ->
@@ -202,6 +197,10 @@ doCommand(Command, State) ->
             modifyNick(string:strip(Remain), State);
         [$q, $u, $i, $t | _ ] ->
             {stop, State#state{data_buf = []}};
+        [$r, $o, $o, $m | Remain] ->
+            newRoom(list_to_atom(string:strip(Remain)), State);
+        [$j, $o, $i, $n | Remain] ->
+            joinRoom(list_to_atom(string:strip(Remain)), State);
         _ ->
             {error, unsupported_command}
     end.
@@ -227,3 +226,38 @@ sayToAll(Msg, State) ->
     room:sayToAll(Room, State#state.nick, lists:append(Msg, "\r\n")),
     ok.
 
+newRoom('', _State) ->
+    {error, empty_roomname};
+
+newRoom(RoomName, State) ->
+    case room_manager:addRoom(RoomName) of
+        {ok, _} ->
+            {ok, State};
+        {error, Reason, _} ->
+            {error, Reason}
+    end.
+
+joinDefaultRoom() -> 
+    {ok,{RoomName, DefaultRoom}} = room_manager:getDefaultRoom(),
+    NickName = room:getAnonymousName(DefaultRoom),
+    room:addParticipant(DefaultRoom, NickName, self()),
+    {ok, NickName, RoomName}.
+
+joinRoom('', _State) ->
+    {error, empty_roomname};
+
+joinRoom(RoomName, State) ->
+    case State#state.room_name of 
+        RoomName ->
+            {ok, State};
+        _ ->
+            {ok, NowRoom} = room_manager:getRoom(State#state.room_name),
+            case room_manager:getRoom(RoomName) of
+                {ok, TargetRoom} ->
+                    room:addParticipant(TargetRoom, State#state.nick, self()),
+                    room:removeParticipant(NowRoom, State#state.nick),
+                    {ok, State#state{room_name = RoomName}};
+                {error, Reason} ->
+                    {error, Reason}
+            end
+    end.

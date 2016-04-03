@@ -16,6 +16,7 @@
          getName/1,
          getAnonymousName/1,
          addParticipant/3,
+         removeParticipant/2,
          getParticipant/2,
          modifyNick/4,
          sayToAll/3
@@ -55,6 +56,9 @@ getAnonymousName(ServerRef) ->
 
 addParticipant(ServerRef, Name, Ref) ->
     gen_server:call(ServerRef, {addParticipant, {Name, Ref}}).
+
+removeParticipant(ServerRef, Name) ->
+    gen_server:call(ServerRef, {removeParticipant, Name}).
 
 getParticipant(ServerRef, Name) ->
     gen_server:call(ServerRef, {getParticipant, Name}).
@@ -120,6 +124,17 @@ handle_call({addParticipant, {Name, Ref}}, _From, State) ->
             NewList = dict:append(Name, Ref, ParticipantList),
             {reply, ok, State#state{participants = NewList}}
     end;
+
+handle_call({removeParticipant, Name},_From, State) ->
+    ParticipantList = State#state.participants,
+    case dict:find(Name, ParticipantList) of
+        {ok, [_]} ->
+            NewDict = dict:erase(Name, ParticipantList),
+            {reply, ok, State#state{participants = NewDict}};
+        error ->
+            {reply, {error, room_not_exist}, State}
+    end;
+
 
 handle_call({getParticipant, Name}, _From, State) ->
     ParticipantList = State#state.participants,
